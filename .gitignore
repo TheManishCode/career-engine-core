@@ -115,3 +115,13 @@ __pycache__/
 *.bak
 *.swp
 *.orig
+
+# Project documentation (local only)
+LICENSE.txt
+
+# Visual Studio solution files (optional)
+*.sln
+*.slnx
+*.vcxproj.user
+*.vcxproj
+*.vcxproj.filters
