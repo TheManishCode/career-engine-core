@@ -4,10 +4,10 @@
 #include <cstddef>
 #include <string_view>
 
-#include "../../../RuleContext.h"
-#include "../../../RuleOutcome.h"
-#include "../../../../types/ClassificationResult.h"
-#include "../../../../types/NormalizedEmail.h"
+#include "../../RuleContext.h"
+#include "../../RuleOutcome.h"
+#include "../../../types/ClassificationResult.h"
+#include "../../../types/NormalizedEmail.h"
 
 namespace career_engine {
 

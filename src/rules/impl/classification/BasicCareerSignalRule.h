@@ -1,7 +1,7 @@
 #ifndef CAREER_ENGINE_RULES_IMPL_CLASSIFICATION_BASIC_CAREER_SIGNAL_RULE_H
 #define CAREER_ENGINE_RULES_IMPL_CLASSIFICATION_BASIC_CAREER_SIGNAL_RULE_H
 
-#include "../../../Rule.h"
+#include "../../Rule.h"
 
 namespace career_engine {
 
