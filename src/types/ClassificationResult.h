@@ -79,7 +79,13 @@ enum class RuleId : std::uint16_t {
     PlatformIndeed,             // Source platform is Indeed
     NoisePatternAdvertisement,  // Matches job advertisement noise patterns
     NoisePatternMassEmail,      // Detected as mass/bulk email
-    FallbackUnknown             // No rules matched; defaulted to Unknown
+    FallbackUnknown,            // No rules matched; defaulted to Unknown
+
+    // Safety rules
+    SafetyHighValueEmail,       // Protects high-value career emails (offer, interview, assignment)
+
+    // Classification rules
+    BasicCareerSignal           // Basic career signal detection (offer, interview, assignment)
 };
 
 /// A single rule match that contributed to the classification.
