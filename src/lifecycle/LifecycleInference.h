@@ -63,3 +63,231 @@ auditable, and fully deterministic.
 
 ===============================================================================
 */
+
+#ifndef CAREER_ENGINE_LIFECYCLE_LIFECYCLE_INFERENCE_H
+#define CAREER_ENGINE_LIFECYCLE_LIFECYCLE_INFERENCE_H
+
+#include <cstdint>
+#include <span>
+
+#include "../types/ClassificationResult.h"
+
+namespace career_engine {
+
+// ============================================================================
+// Lifecycle State (Level-1 Core Engine)
+// ============================================================================
+
+/// Represents the inferred state of a career event lifecycle.
+/// Constrained to Level-1 semantics: derived directly from SignalCategory.
+enum class LifecycleState : std::uint8_t {
+    /// No lifecycle information available or not applicable.
+    Unknown,
+
+    /// Application or assignment-related signal received.
+    Applied,
+
+    /// Interview signal received, actively engaged in process.
+    Interviewing,
+
+    /// Offer signal received.
+    Offer,
+
+    /// Process concluded (rejection or no further signals expected).
+    Closed
+};
+
+// ============================================================================
+// Lifecycle Policy
+// ============================================================================
+
+/// Controls how lifecycle inference handles the Closed state.
+enum class LifecyclePolicy : std::uint8_t {
+    /// Once Closed is reached, ignore remaining events.
+    /// Use when events are strictly sequential and closure is final.
+    ClosedIsTerminal,
+
+    /// Allow transitions from Closed back to other states.
+    /// Use when processes can reopen (e.g., new role at same company).
+    ClosedCanReopen
+};
+
+// ============================================================================
+// Lifecycle Event
+// ============================================================================
+
+/// A single lifecycle event derived from a classified email signal.
+/// Contains only SignalCategory and timestamp — no separate event type.
+struct LifecycleEvent final {
+    /// The classified signal category from the email.
+    const SignalCategory signal;
+
+    /// UTC timestamp of the email (seconds since epoch).
+    const std::int64_t timestamp_utc;
+};
+
+// ============================================================================
+// State Transition Logic
+// ============================================================================
+
+namespace detail {
+
+/// Determines if Closed state should stop processing.
+[[nodiscard]] constexpr bool is_closed(LifecycleState state) noexcept {
+    return state == LifecycleState::Closed;
+}
+
+/// Applies a single signal to the current state.
+/// Transitions are derived directly from SignalCategory.
+/// Returns the new state after the transition.
+[[nodiscard]] constexpr LifecycleState apply_transition(
+    LifecycleState current,
+    SignalCategory signal) noexcept
+{
+    switch (current) {
+        case LifecycleState::Unknown:
+            switch (signal) {
+                case SignalCategory::Unknown:
+                    return LifecycleState::Unknown;
+                case SignalCategory::Offer:
+                    return LifecycleState::Offer;
+                case SignalCategory::Rejection:
+                    return LifecycleState::Closed;
+                case SignalCategory::Interview:
+                    return LifecycleState::Interviewing;
+                case SignalCategory::Assignment:
+                    return LifecycleState::Applied;
+                case SignalCategory::RecruiterOutreach:
+                    return LifecycleState::Applied;
+                case SignalCategory::Advertisement:
+                    return LifecycleState::Unknown;
+            }
+            break;
+
+        case LifecycleState::Applied:
+            switch (signal) {
+                case SignalCategory::Unknown:
+                    return LifecycleState::Applied;
+                case SignalCategory::Offer:
+                    return LifecycleState::Offer;
+                case SignalCategory::Rejection:
+                    return LifecycleState::Closed;
+                case SignalCategory::Interview:
+                    return LifecycleState::Interviewing;
+                case SignalCategory::Assignment:
+                    return LifecycleState::Applied;
+                case SignalCategory::RecruiterOutreach:
+                    return LifecycleState::Applied;
+                case SignalCategory::Advertisement:
+                    return LifecycleState::Applied;
+            }
+            break;
+
+        case LifecycleState::Interviewing:
+            switch (signal) {
+                case SignalCategory::Unknown:
+                    return LifecycleState::Interviewing;
+                case SignalCategory::Offer:
+                    return LifecycleState::Offer;
+                case SignalCategory::Rejection:
+                    return LifecycleState::Closed;
+                case SignalCategory::Interview:
+                    return LifecycleState::Interviewing;
+                case SignalCategory::Assignment:
+                    return LifecycleState::Interviewing;
+                case SignalCategory::RecruiterOutreach:
+                    return LifecycleState::Interviewing;
+                case SignalCategory::Advertisement:
+                    return LifecycleState::Interviewing;
+            }
+            break;
+
+        case LifecycleState::Offer:
+            switch (signal) {
+                case SignalCategory::Unknown:
+                    return LifecycleState::Offer;
+                case SignalCategory::Offer:
+                    return LifecycleState::Offer;
+                case SignalCategory::Rejection:
+                    return LifecycleState::Closed;
+                case SignalCategory::Interview:
+                    return LifecycleState::Offer;
+                case SignalCategory::Assignment:
+                    return LifecycleState::Offer;
+                case SignalCategory::RecruiterOutreach:
+                    return LifecycleState::Offer;
+                case SignalCategory::Advertisement:
+                    return LifecycleState::Offer;
+            }
+            break;
+
+        case LifecycleState::Closed:
+            switch (signal) {
+                case SignalCategory::Unknown:
+                    return LifecycleState::Closed;
+                case SignalCategory::Offer:
+                    return LifecycleState::Offer;
+                case SignalCategory::Rejection:
+                    return LifecycleState::Closed;
+                case SignalCategory::Interview:
+                    return LifecycleState::Interviewing;
+                case SignalCategory::Assignment:
+                    return LifecycleState::Applied;
+                case SignalCategory::RecruiterOutreach:
+                    return LifecycleState::Applied;
+                case SignalCategory::Advertisement:
+                    return LifecycleState::Closed;
+            }
+            break;
+    }
+
+    return current; // Unreachable, but satisfies compiler
+}
+
+} // namespace detail
+
+// ============================================================================
+// Lifecycle Inference Function
+// ============================================================================
+
+/// Infers the final lifecycle state from a sequence of classified events.
+///
+/// Behavior:
+/// - Starts from LifecycleState::Unknown
+/// - Events are processed in provided order (no sorting performed)
+/// - Transitions are derived directly from SignalCategory
+/// - Policy controls handling of Closed state
+///
+/// Guarantees:
+/// - Deterministic: same events and policy produce same result
+/// - No side effects
+/// - No dynamic allocation
+/// - No exceptions
+///
+/// @param events Span of lifecycle events (processed in order)
+/// @param policy Controls whether Closed state stops processing
+/// @return The final inferred lifecycle state
+[[nodiscard]] constexpr LifecycleState infer(
+    std::span<const LifecycleEvent> events,
+    LifecyclePolicy policy) noexcept
+{
+    LifecycleState state = LifecycleState::Unknown;
+
+    for (const LifecycleEvent& event : events) {
+        // Check if we should stop processing
+        if (policy == LifecyclePolicy::ClosedIsTerminal) {
+            if (detail::is_closed(state)) {
+                break;
+            }
+        }
+
+        // Apply transition based on signal category
+        state = detail::apply_transition(state, event.signal);
+    }
+
+    return state;
+}
+
+} // namespace career_engine
+
+#endif // CAREER_ENGINE_LIFECYCLE_LIFECYCLE_INFERENCE_H
