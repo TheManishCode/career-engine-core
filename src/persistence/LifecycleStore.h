@@ -19,11 +19,11 @@ namespace persistence {
         // Save lifecycle state for a career thread / opportunity
         virtual void save(
             const std::string& thread_id,
-            LifecycleState state
+            career_engine::LifecycleState state
         ) = 0;
 
         // Load lifecycle state for a career thread / opportunity
-        virtual std::optional<LifecycleState>
+        virtual std::optional<career_engine::LifecycleState>
             load(const std::string& thread_id) const = 0;
     };
 
