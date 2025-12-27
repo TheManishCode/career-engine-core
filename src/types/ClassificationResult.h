@@ -85,7 +85,10 @@ enum class RuleId : std::uint16_t {
     SafetyHighValueEmail,       // Protects high-value career emails (offer, interview, assignment)
 
     // Classification rules
-    BasicCareerSignal           // Basic career signal detection (offer, interview, assignment)
+    BasicCareerSignal,          // Basic career signal detection (offer, interview, assignment)
+
+    // Noise rules
+    JobPlatformNoise            // Job platform promotional/noise emails
 };
 
 /// A single rule match that contributed to the classification.

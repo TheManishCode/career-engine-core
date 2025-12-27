@@ -10,6 +10,7 @@
 #include "../rules/RuleEngine.h"
 #include "../rules/RuleOutcome.h"
 #include "../rules/impl/classification/BasicCareerSignalRule.h"
+#include "../rules/impl/noise/JobPlatformNoiseRule.h"
 #include "../rules/impl/safety/ProtectHighValueEmailsRule.h"
 #include "../types/ClassificationResult.h"
 #include "../types/NormalizedEmail.h"
@@ -30,13 +31,17 @@ ClassificationResult aggregate_outcomes(std::span<const RuleOutcome> outcomes) n
 namespace {
 
 // Static rule instances with stable lifetime
+// Order: Safety -> Classification -> Noise
 const ProtectHighValueEmailsRule kSafetyRule;
 const BasicCareerSignalRule kClassificationRule;
+const JobPlatformNoiseRule kNoiseRule;
 
 // Static rule pointer array for RuleEngine
-constexpr std::array<const Rule*, 2> kBuiltInRules = {
+// Deterministic order: Safety first, then Classification, then Noise
+constexpr std::array<const Rule*, 3> kBuiltInRules = {
     &kSafetyRule,
-    &kClassificationRule
+    &kClassificationRule,
+    &kNoiseRule
 };
 
 } // anonymous namespace
