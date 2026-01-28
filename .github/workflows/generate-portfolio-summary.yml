@@ -58,48 +58,70 @@ jobs:
             echo "proceed=true" >> $GITHUB_OUTPUT
           fi
 
-      - name: Setup Node
+      - name: Setup Node.js
         if: steps.override.outputs.skip != 'true' && steps.readme.outputs.proceed == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      - name: Generate portfolio summary
+      - name: Generate portfolio summary (DEBUG MODE)
         if: steps.override.outputs.skip != 'true' && steps.readme.outputs.proceed == 'true'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO_NAME: ${{ github.repository }}
         run: |
-          cat > generate-summary.mjs << EOF
+          cat > generate-summary.mjs << 'EOF'
           import fs from "fs";
+
+          console.log("▶️ Starting portfolio summary generation");
 
           const apiKey = process.env.GEMINI_API_KEY;
           const token = process.env.GITHUB_TOKEN;
-          const [owner, repo] = process.env.REPO_NAME.split("/");
+          const repoName = process.env.REPO_NAME;
 
-          if (!apiKey) process.exit(1);
+          console.log("Env check:", {
+            hasApiKey: !!apiKey,
+            hasGithubToken: !!token,
+            repoName
+          });
+
+          if (!apiKey) {
+            console.error("❌ GEMINI_API_KEY missing");
+            process.exit(1);
+          }
+
+          const [owner, repo] = repoName.split("/");
 
           const readme = fs.readFileSync("README.md", "utf8");
-          if (readme.length < 50) process.exit(1);
+          console.log("README length:", readme.length);
 
-          const repoRes = await fetch("https://api.github.com/repos/" + owner + "/" + repo, {
-            headers: { Authorization: "Bearer " + token }
-          });
+          const repoRes = await fetch(
+            "https://api.github.com/repos/" + owner + "/" + repo,
+            { headers: { Authorization: "Bearer " + token } }
+          );
           const repoData = await repoRes.json();
 
-          const langRes = await fetch("https://api.github.com/repos/" + owner + "/" + repo + "/languages", {
-            headers: { Authorization: "Bearer " + token }
-          });
+          const langRes = await fetch(
+            "https://api.github.com/repos/" + owner + "/" + repo + "/languages",
+            { headers: { Authorization: "Bearer " + token } }
+          );
           const languages = await langRes.json();
 
           const prompt =
-            "Write a concise portfolio summary.\\n" +
-            "No marketing. No buzzwords. Under 120 words.\\n\\n" +
-            "Repo: " + repo + "\\n" +
-            "Description: " + (repoData.description || "None") + "\\n" +
-            "Languages: " + Object.keys(languages).join(", ") + "\\n\\n" +
+            "You are a senior software engineer writing a portfolio summary.\n" +
+            "Rules:\n" +
+            "- No marketing or hype\n" +
+            "- No buzzwords\n" +
+            "- Under 120 words\n" +
+            "- Output VALID JSON ONLY\n\n" +
+            "Repo: " + repo + "\n" +
+            "Description: " + (repoData.description || "None") + "\n" +
+            "Languages: " + Object.keys(languages).join(", ") + "\n\n" +
+            "README:\n" +
             readme.slice(0, 4000);
+
+          console.log("▶️ Sending prompt to Gemini");
 
           const res = await fetch(
             "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + apiKey,
@@ -114,11 +136,35 @@ jobs:
           );
 
           const data = await res.json();
-          let text = data.candidates[0].content.parts[0].text.trim();
-          text = text.replace(/^```json/, "").replace(/```$/, "");
+          console.log("🧠 Gemini raw response:");
+          console.log(JSON.stringify(data, null, 2));
 
-          const json = JSON.parse(text);
-          fs.writeFileSync("portfolio.summary.json", JSON.stringify(json, null, 2));
+          if (!data.candidates || !data.candidates[0]?.content?.parts?.[0]?.text) {
+            console.error("❌ Gemini returned no usable text");
+            process.exit(1);
+          }
+
+          let text = data.candidates[0].content.parts[0].text.trim();
+          console.log("📝 Gemini text output:");
+          console.log(text);
+
+          text = text.replace(/^```json/i, "").replace(/```$/i, "").trim();
+
+          let summary;
+          try {
+            summary = JSON.parse(text);
+          } catch (e) {
+            console.error("❌ JSON parse failed");
+            console.error(text);
+            process.exit(1);
+          }
+
+          fs.writeFileSync(
+            "portfolio.summary.json",
+            JSON.stringify(summary, null, 2)
+          );
+
+          console.log("✅ portfolio.summary.json written successfully");
           EOF
 
           node generate-summary.mjs
@@ -133,4 +179,7 @@ jobs:
             git add portfolio.summary.json
             git commit -m "chore: update portfolio summary [skip ci]"
             git push
+            echo "✅ Committed portfolio.summary.json"
+          else
+            echo "⏭️ No changes to commit"
           fi
