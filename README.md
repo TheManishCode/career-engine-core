@@ -1,5 +1,5 @@
 ﻿# Career Engine — Core Intelligence
-
+ 
 ## Overview
 
 The Career Engine is a **local-first, deterministic intelligence core**
