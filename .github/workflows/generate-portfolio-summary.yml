@@ -12,7 +12,7 @@ on:
     inputs:
       force:
         description: Force regeneration even if no changes
-        required: false
+        required: true
         default: "false"
 
 permissions:
@@ -124,7 +124,7 @@ jobs:
           console.log("▶️ Sending prompt to Gemini");
 
           const res = await fetch(
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + apiKey,
+            ""https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=" + apiKey,
             {
               method: "POST",
               headers: { "Content-Type": "application/json" },
