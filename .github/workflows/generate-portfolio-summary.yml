@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: Force regeneration
+        description: Force regeneration even if README changes are small
         required: false
         default: "false"
 
@@ -25,13 +25,47 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check for override file
+        id: override
+        run: |
+          if [ -f portfolio.override.md ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "Override file present, skipping."
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Check for meaningful README changes
+        id: readme-check
+        if: steps.override.outputs.skip != 'true'
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" = "true" ]; then
+            echo "proceed=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          if git diff HEAD~1 --quiet -- README.md 2>/dev/null; then
+            echo "proceed=false" >> $GITHUB_OUTPUT
+          else
+            CHANGES=$(git diff HEAD~1 -- README.md | grep -E "^[+-]" | grep -vE "^[+-]{3}" | wc -l)
+            if [ "$CHANGES" -lt 5 ]; then
+              echo "proceed=false" >> $GITHUB_OUTPUT
+            else
+              echo "proceed=true" >> $GITHUB_OUTPUT
+            fi
+          fi
 
       - name: Setup Node.js
+        if: steps.override.outputs.skip != 'true' && steps.readme-check.outputs.proceed == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
       - name: Generate portfolio summary
+        if: steps.override.outputs.skip != 'true' && steps.readme-check.outputs.proceed == 'true'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -39,6 +73,8 @@ jobs:
         run: |
           cat << 'EOF' > generate-summary.mjs
           import fs from "fs";
+
+          console.log("▶ Starting portfolio summary generation");
 
           const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
           const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
@@ -50,6 +86,10 @@ jobs:
           }
 
           const readme = fs.readFileSync("README.md", "utf-8");
+          if (readme.trim().length < 50) {
+            console.error("README too short");
+            process.exit(1);
+          }
 
           const repoRes = await fetch(
             `https://api.github.com/repos/${owner}/${repo}`,
@@ -64,28 +104,31 @@ jobs:
           const languages = await langRes.json();
 
           const prompt = `
-You are a senior software engineer writing a portfolio summary.
+          You are a senior software engineer writing a concise portfolio summary.
 
-Rules:
-- No marketing
-- No buzzwords
-- No exaggeration
-- Max 120 words
-- JSON only
+          RULES:
+          - No marketing or buzzwords
+          - No exaggeration
+          - No installation instructions
+          - Max 120 words
+          - JSON only
+          - Omit fields if unclear
 
-Repo: ${repo}
-Description: ${repoData.description || "None"}
-Languages: ${Object.keys(languages).join(", ")}
+          Repo: ${repo}
+          Description: ${repoData.description || "None"}
+          Topics: ${(repoData.topics || []).join(", ") || "None"}
+          Languages: ${Object.keys(languages).join(", ")}
 
-README:
-${readme.slice(0, 4000)}
+          README:
+          ${readme.slice(0, 4000)}
 
-Output:
-{
-  "purpose": "...",
-  "key_focus": ["...", "..."],
-  "scope": "..."
-}
+          OUTPUT JSON:
+          {
+            "purpose": "1–2 sentences",
+            "key_focus": ["3–5 technical areas"],
+            "scope": "single sentence",
+            "limitations": "optional"
+          }
           `.trim();
 
           const res = await fetch(
@@ -95,42 +138,58 @@ Output:
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 contents: [{ parts: [{ text: prompt }] }],
-              }),
+                generationConfig: { temperature: 0.2 }
+              })
             }
           );
 
           const data = await res.json();
-          const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
 
+          const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
           if (!text) {
-            console.error("Gemini returned no content");
+            console.error("Gemini returned no usable content");
             console.error(JSON.stringify(data, null, 2));
             process.exit(1);
           }
 
-          const cleaned = text.replace(/```json|```/g, "").trim();
-          const summary = JSON.parse(cleaned);
+          const clean = text.replace(/^\`\`\`json?/i, "").replace(/\`\`\`$/, "").trim();
 
-          fs.writeFileSync(
-            "portfolio.summary.json",
-            JSON.stringify(summary, null, 2)
-          );
+          let summary;
+          try {
+            summary = JSON.parse(clean);
+          } catch {
+            console.error("Invalid JSON returned:");
+            console.error(clean);
+            process.exit(1);
+          }
 
-          console.log("portfolio.summary.json written");
+          if (!summary.purpose || !Array.isArray(summary.key_focus) || !summary.scope) {
+            console.error("Schema validation failed");
+            process.exit(1);
+          }
+
+          fs.writeFileSync("portfolio.summary.json", JSON.stringify(summary, null, 2));
+          console.log("✔ portfolio.summary.json generated");
           EOF
 
           node generate-summary.mjs
 
-      - name: Commit summary
+      - name: Commit summary if new or changed
+        if: steps.override.outputs.skip != 'true' && steps.readme-check.outputs.proceed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          git add portfolio.summary.json
+          if [ ! -f portfolio.summary.json ]; then
+            echo "portfolio.summary.json missing"
+            exit 1
+          fi
 
-          if git diff --cached --quiet; then
-            echo "No changes to commit"
-          else
-            git commit -m "chore: generate portfolio summary"
+          if git status --porcelain | grep -q portfolio.summary.json; then
+            git add portfolio.summary.json
+            git commit -m "chore: update portfolio summary [skip ci]"
             git push
+            echo "Committed summary"
+          else
+            echo "No changes to commit"
           fi
