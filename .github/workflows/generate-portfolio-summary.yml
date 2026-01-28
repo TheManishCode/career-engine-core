@@ -168,6 +168,7 @@ jobs:
             process.exit(1);
           }
 
+          summary._generated_at = new Date().toISOString();
           fs.writeFileSync("portfolio.summary.json", JSON.stringify(summary, null, 2));
           console.log("✔ portfolio.summary.json generated");
           EOF
