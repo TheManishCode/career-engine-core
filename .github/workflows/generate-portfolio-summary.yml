@@ -32,7 +32,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO_NAME: ${{ github.repository }}
         run: |
-          cat << 'EOF' > generate-summary.mjs
+          cat <<'EOF' > generate-summary.mjs
           import fs from "fs";
 
           const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -40,7 +40,7 @@ jobs:
           const [owner, repo] = process.env.REPO_NAME.split("/");
 
           if (!GEMINI_API_KEY) {
-            console.error("❌ Missing GEMINI_API_KEY");
+            console.error("Missing GEMINI_API_KEY");
             process.exit(1);
           }
 
@@ -59,29 +59,29 @@ jobs:
           const languages = await langRes.json();
 
           const prompt = `
-You are a senior software engineer writing a concise portfolio summary.
+          You are a senior software engineer writing a concise portfolio summary.
 
-RULES:
-- No marketing or buzzwords
-- No exaggeration
-- No installation instructions
-- Max 120 words
-- JSON only
+          RULES:
+          - No marketing or buzzwords
+          - No exaggeration
+          - No installation instructions
+          - Max 120 words
+          - JSON only
 
-Repo: ${repo}
-Description: ${repoData.description || "None"}
-Languages: ${Object.keys(languages).join(", ")}
+          Repo: ${repo}
+          Description: ${repoData.description || "None"}
+          Languages: ${Object.keys(languages).join(", ")}
 
-README:
-${readme.slice(0, 4000)}
+          README:
+          ${readme.slice(0, 4000)}
 
-OUTPUT JSON:
-{
-  "purpose": "1–2 sentences",
-  "key_focus": ["3–5 technical areas"],
-  "scope": "single sentence",
-  "limitations": "optional"
-}
+          OUTPUT JSON:
+          {
+            "purpose": "1–2 sentences",
+            "key_focus": ["3–5 technical areas"],
+            "scope": "single sentence",
+            "limitations": "optional"
+          }
           `.trim();
 
           const res = await fetch(
@@ -100,7 +100,7 @@ OUTPUT JSON:
           const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
           if (!text) {
-            console.error("❌ Gemini returned no content");
+            console.error("Gemini returned no content");
             console.error(JSON.stringify(data, null, 2));
             process.exit(1);
           }
@@ -108,14 +108,12 @@ OUTPUT JSON:
           const clean = text.replace(/```json|```/g, "").trim();
           const summary = JSON.parse(clean);
 
-          summary._generated_at = new Date().toISOString();
-
           fs.writeFileSync(
             "portfolio.summary.json",
             JSON.stringify(summary, null, 2)
           );
 
-          console.log("✅ portfolio.summary.json generated");
+          console.log("portfolio.summary.json generated");
           EOF
 
           node generate-summary.mjs
@@ -130,7 +128,6 @@ OUTPUT JSON:
           if git diff --cached --quiet; then
             echo "No changes to commit"
           else
-            git commit -m "chore: generate portfolio summary [skip ci]"
+            git commit -m "chore: generate portfolio summary"
             git push
-            echo "✅ Summary committed"
           fi
