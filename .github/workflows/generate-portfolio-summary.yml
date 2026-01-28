@@ -1,0 +1,241 @@
+name: Generate Portfolio Summary
+
+on:
+  push:
+    paths:
+      - 'README.md'
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force regeneration even if no changes'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+
+jobs:
+  generate-summary:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Need previous commit for diff check
+      
+      - name: Check for override file
+        id: override
+        run: |
+          if [ -f "portfolio.override.md" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "⚠️ portfolio.override.md exists, skipping generation"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Check for meaningful README changes
+        id: readme-check
+        if: steps.override.outputs.skip != 'true'
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" = "true" ]; then
+            echo "proceed=true" >> $GITHUB_OUTPUT
+            echo "✅ Manual dispatch with force flag"
+            exit 0
+          fi
+          
+          # Check if README actually changed meaningfully (not just whitespace/badges)
+          if git diff HEAD~1 --quiet -- README.md 2>/dev/null; then
+            echo "proceed=false" >> $GITHUB_OUTPUT
+            echo "⏭️ No meaningful README changes"
+          else
+            # Get diff stats
+            CHANGES=$(git diff HEAD~1 -- README.md | grep -E "^[+-]" | grep -vE "^[+-]{3}" | wc -l)
+            if [ "$CHANGES" -lt 5 ]; then
+              echo "proceed=false" >> $GITHUB_OUTPUT
+              echo "⏭️ Only minor changes detected ($CHANGES lines)"
+            else
+              echo "proceed=true" >> $GITHUB_OUTPUT
+              echo "✅ Meaningful changes detected ($CHANGES lines)"
+            fi
+          fi
+      
+      - name: Setup Node.js
+        if: steps.override.outputs.skip != 'true' && steps.readme-check.outputs.proceed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Generate portfolio summary
+        if: steps.override.outputs.skip != 'true' && steps.readme-check.outputs.proceed == 'true'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.PORTFOLIO_BOT_TOKEN }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          cat << 'SCRIPT' > generate-summary.mjs
+          import fs from 'fs';
+          
+          const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+          const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
+          const [owner, repo] = process.env.REPO_NAME.split('/');
+          
+          if (!GEMINI_API_KEY) {
+            console.error('❌ GEMINI_API_KEY secret not set');
+            process.exit(1);
+          }
+          
+          // Read README
+          let readme = '';
+          try {
+            readme = fs.readFileSync('README.md', 'utf-8');
+          } catch (e) {
+            console.error('❌ README.md not found or unreadable');
+            process.exit(1);
+          }
+          
+          if (readme.trim().length < 50) {
+            console.error('❌ README too short for meaningful summary');
+            process.exit(1);
+          }
+          
+          // Fetch repo metadata from GitHub API
+          const repoRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+            headers: { Authorization: `Bearer ${GITHUB_TOKEN}` }
+          });
+          const repoData = await repoRes.json();
+          
+          // Fetch languages
+          const langRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/languages`, {
+            headers: { Authorization: `Bearer ${GITHUB_TOKEN}` }
+          });
+          const languages = await langRes.json();
+          
+          // Build prompt
+          const prompt = `You are a senior software engineer writing a portfolio summary for a GitHub project.
+          
+          STRICT RULES:
+          - Do NOT exaggerate, market, or invent features.
+          - Do NOT use buzzwords (e.g., "robust", "cutting-edge", "highly scalable", "powerful").
+          - Do NOT claim production readiness unless explicitly stated in the README.
+          - Do NOT include installation steps, commands, badges, or screenshots.
+          - If information is missing or unclear, OMIT the field entirely rather than inferring.
+          - Maintain a factual, professional, senior-engineer tone.
+          - Preserve the author's original technical intent.
+          - Keep total output under 120 words.
+          
+          INPUT DATA:
+          - Repository: ${repo}
+          - Description: ${repoData.description || 'None provided'}
+          - Topics: ${(repoData.topics || []).join(', ') || 'None'}
+          - Languages: ${Object.keys(languages).join(', ')}
+          - README Content:
+          ${readme.slice(0, 4000)}
+          
+          OUTPUT (JSON only, no markdown fences):
+          {
+            "purpose": "1-2 sentences describing what the project is and why it exists.",
+            "key_focus": ["3-5 concise technical focus areas derived from the codebase and README"],
+            "scope": "A single sentence describing the scale, boundaries, or intended usage.",
+            "limitations": "Include only if clearly stated in README; otherwise omit this field entirely."
+          }
+          
+          Respond with ONLY valid JSON, no explanation.`;
+          
+          // Call Gemini API
+          const geminiRes = await fetch(
+            \`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=\${GEMINI_API_KEY}\`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: {
+                  temperature: 0.2,
+                  maxOutputTokens: 500,
+                }
+              })
+            }
+          );
+          
+          const geminiData = await geminiRes.json();
+          
+          if (!geminiData.candidates?.[0]?.content?.parts?.[0]?.text) {
+            console.error('❌ Gemini API returned no content');
+            console.error(JSON.stringify(geminiData, null, 2));
+            process.exit(1);
+          }
+          
+          let rawOutput = geminiData.candidates[0].content.parts[0].text.trim();
+          
+          // Clean potential markdown fences
+          rawOutput = rawOutput.replace(/^\`\`\`json?\n?/i, '').replace(/\n?\`\`\`$/i, '');
+          
+          // Parse and validate
+          let summary;
+          try {
+            summary = JSON.parse(rawOutput);
+          } catch (e) {
+            console.error('❌ Failed to parse JSON output:');
+            console.error(rawOutput);
+            process.exit(1);
+          }
+          
+          // Schema validation
+          const errors = [];
+          
+          if (typeof summary.purpose !== 'string' || summary.purpose.length < 10) {
+            errors.push('purpose must be a non-empty string');
+          }
+          
+          if (!Array.isArray(summary.key_focus)) {
+            errors.push('key_focus must be an array');
+          } else if (summary.key_focus.length < 3 || summary.key_focus.length > 5) {
+            errors.push('key_focus must have 3-5 items');
+          }
+          
+          if (typeof summary.scope !== 'string' || summary.scope.length < 10) {
+            errors.push('scope must be a non-empty string');
+          }
+          
+          if (summary.limitations !== undefined && typeof summary.limitations !== 'string') {
+            errors.push('limitations must be a string or omitted');
+          }
+          
+          if (errors.length > 0) {
+            console.error('❌ Schema validation failed:');
+            errors.forEach(e => console.error('  - ' + e));
+            process.exit(1);
+          }
+          
+          // Remove limitations if empty
+          if (summary.limitations === '' || summary.limitations === null) {
+            delete summary.limitations;
+          }
+          
+          // Write output
+          fs.writeFileSync('portfolio.summary.json', JSON.stringify(summary, null, 2));
+          console.log('✅ Generated portfolio.summary.json');
+          console.log(JSON.stringify(summary, null, 2));
+          SCRIPT
+          
+          node generate-summary.mjs
+      
+      - name: Commit summary if changed
+        if: steps.override.outputs.skip != 'true' && steps.readme-check.outputs.proceed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Only commit if file actually changed
+          if git diff --quiet portfolio.summary.json 2>/dev/null; then
+            echo "⏭️ No changes to portfolio.summary.json"
+          else
+            git add portfolio.summary.json
+            git commit -m "chore: update portfolio summary [skip ci]"
+            git push
+            echo "✅ Committed portfolio.summary.json"
+          fi
