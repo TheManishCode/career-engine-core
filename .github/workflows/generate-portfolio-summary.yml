@@ -3,7 +3,7 @@ name: Generate Portfolio Summary
 on:
   push:
     paths:
-      - 'README.md'
+      - README.md
     branches:
       - main
       - master
@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       force:
-        description: 'Force regeneration even if no changes'
+        description: Force regeneration even if no changes
         required: false
-        default: 'false'
+        default: "false"
 
 permissions:
   contents: write
@@ -31,108 +31,81 @@ jobs:
       - name: Check for override file
         id: override
         run: |
-          if [ -f "portfolio.override.md" ]; then
+          if [ -f portfolio.override.md ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "⚠️ portfolio.override.md exists, skipping generation"
           else
             echo "skip=false" >> $GITHUB_OUTPUT
           fi
 
       - name: Check for meaningful README changes
-        id: readme-check
+        id: readme
         if: steps.override.outputs.skip != 'true'
         run: |
           if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" = "true" ]; then
             echo "proceed=true" >> $GITHUB_OUTPUT
-            echo "✅ Forced regeneration requested"
             exit 0
           fi
 
           if git diff HEAD~1 --quiet -- README.md 2>/dev/null; then
             echo "proceed=false" >> $GITHUB_OUTPUT
-            echo "⏭️ No meaningful README changes"
-          else
-            CHANGES=$(git diff HEAD~1 -- README.md | grep -E "^[+-]" | grep -vE "^[+-]{3}" | wc -l)
-            if [ "$CHANGES" -lt 5 ]; then
-              echo "proceed=false" >> $GITHUB_OUTPUT
-              echo "⏭️ Only minor changes detected ($CHANGES lines)"
-            else
-              echo "proceed=true" >> $GITHUB_OUTPUT
-              echo "✅ Meaningful README changes detected ($CHANGES lines)"
-            fi
+            exit 0
           fi
 
-      - name: Setup Node.js
-        if: steps.override.outputs.skip != 'true' && steps.readme-check.outputs.proceed == 'true'
+          CHANGES=$(git diff HEAD~1 -- README.md | grep -E "^[+-]" | grep -vE "^[+-]{3}" | wc -l)
+          if [ "$CHANGES" -lt 5 ]; then
+            echo "proceed=false" >> $GITHUB_OUTPUT
+          else
+            echo "proceed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Node
+        if: steps.override.outputs.skip != 'true' && steps.readme.outputs.proceed == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: 20
 
       - name: Generate portfolio summary
-        if: steps.override.outputs.skip != 'true' && steps.readme-check.outputs.proceed == 'true'
+        if: steps.override.outputs.skip != 'true' && steps.readme.outputs.proceed == 'true'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO_NAME: ${{ github.repository }}
         run: |
-          cat << 'SCRIPT' > generate-summary.mjs
-          import fs from 'fs';
+          cat > generate-summary.mjs << EOF
+          import fs from "fs";
 
-          const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-          const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-          const [owner, repo] = process.env.REPO_NAME.split('/');
+          const apiKey = process.env.GEMINI_API_KEY;
+          const token = process.env.GITHUB_TOKEN;
+          const [owner, repo] = process.env.REPO_NAME.split("/");
 
-          if (!GEMINI_API_KEY) {
-            console.error('❌ GEMINI_API_KEY not set');
-            process.exit(1);
-          }
+          if (!apiKey) process.exit(1);
 
-          const readme = fs.readFileSync('README.md', 'utf-8');
-          if (readme.trim().length < 50) {
-            console.error('❌ README too short');
-            process.exit(1);
-          }
+          const readme = fs.readFileSync("README.md", "utf8");
+          if (readme.length < 50) process.exit(1);
 
-          const repoRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
-            headers: { Authorization: `Bearer ${GITHUB_TOKEN}` }
+          const repoRes = await fetch("https://api.github.com/repos/" + owner + "/" + repo, {
+            headers: { Authorization: "Bearer " + token }
           });
           const repoData = await repoRes.json();
 
-          const langRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/languages`, {
-            headers: { Authorization: `Bearer ${GITHUB_TOKEN}` }
+          const langRes = await fetch("https://api.github.com/repos/" + owner + "/" + repo + "/languages", {
+            headers: { Authorization: "Bearer " + token }
           });
           const languages = await langRes.json();
 
-          const prompt = `You are a senior software engineer writing a portfolio summary.
-
-STRICT RULES:
-- No exaggeration or marketing language
-- No buzzwords
-- No installation steps or badges
-- Stay factual
-- Under 120 words
-
-INPUT:
-- Repo: ${repo}
-- Description: ${repoData.description || 'None'}
-- Topics: ${(repoData.topics || []).join(', ') || 'None'}
-- Languages: ${Object.keys(languages).join(', ')}
-- README:
-${readme.slice(0, 4000)}
-
-OUTPUT (JSON only):
-{
-  "purpose": "",
-  "key_focus": [],
-  "scope": "",
-  "limitations": ""
-}`;
+          const prompt =
+            "Write a concise portfolio summary.\\n" +
+            "No marketing. No buzzwords. Under 120 words.\\n\\n" +
+            "Repo: " + repo + "\\n" +
+            "Description: " + (repoData.description || "None") + "\\n" +
+            "Languages: " + Object.keys(languages).join(", ") + "\\n\\n" +
+            readme.slice(0, 4000);
 
           const res = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=" + apiKey,
             {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
                 contents: [{ parts: [{ text: prompt }] }],
                 generationConfig: { temperature: 0.2 }
@@ -141,33 +114,23 @@ OUTPUT (JSON only):
           );
 
           const data = await res.json();
-          let output = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-          output = output.replace(/^\`\`\`json?\n?/i, '').replace(/\n?\`\`\`$/i, '');
+          let text = data.candidates[0].content.parts[0].text.trim();
+          text = text.replace(/^```json/, "").replace(/```$/, "");
 
-          const summary = JSON.parse(output);
-
-          fs.writeFileSync('portfolio.summary.json', JSON.stringify(summary, null, 2));
-          console.log('✅ portfolio.summary.json generated');
-          SCRIPT
+          const json = JSON.parse(text);
+          fs.writeFileSync("portfolio.summary.json", JSON.stringify(json, null, 2));
+          EOF
 
           node generate-summary.mjs
 
-      - name: Commit summary if changed or new
-        if: steps.override.outputs.skip != 'true' && steps.readme-check.outputs.proceed == 'true'
+      - name: Commit summary if new or changed
+        if: steps.override.outputs.skip != 'true' && steps.readme.outputs.proceed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          if [ ! -f portfolio.summary.json ]; then
-            echo "❌ portfolio.summary.json missing"
-            exit 1
-          fi
-
-          if git status --porcelain | grep -q "portfolio.summary.json"; then
+          if git status --porcelain | grep -q portfolio.summary.json; then
             git add portfolio.summary.json
             git commit -m "chore: update portfolio summary [skip ci]"
             git push
-            echo "✅ Committed portfolio.summary.json"
-          else
-            echo "⏭️ No changes to portfolio.summary.json"
           fi
