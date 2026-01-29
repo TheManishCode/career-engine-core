@@ -4,11 +4,9 @@
   "categories": [
     "creations",
     "featured",
-    "now",
-    "open-source",
-    "sketches"
+    "now"
   ],
-  "status": "completed",
+  "status": "In-Progress",
   "priority": 1,
   "tags": [
     "deterministic-orchestration",
