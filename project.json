@@ -1,0 +1,25 @@
+{
+  "title": "Career Engine — Core Intelligence",
+  "description": "A local-first, deterministic C++20 core engine designed for high-security classification and reasoning of career-related signals. It prioritizes safety and explainability, featuring a rule-based intelligence pipeline that protects critical user data without cloud dependencies.",
+  "categories": [
+    "creations",
+    "featured"
+  ],
+  "status": "completed",
+  "priority": 1,
+  "tags": [
+    "deterministic-orchestration",
+    "safety-monotonicity",
+    "phased-evaluation",
+    "career-signal-classification",
+    "rule-based-intelligence"
+  ],
+  "techStack": [
+    "C++20",
+    "CMake",
+    "GoogleTest",
+    "STL"
+  ],
+  "type": "project",
+  "visibility": true
+}
