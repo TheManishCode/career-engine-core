@@ -3,7 +3,8 @@
   "description": "A local-first, deterministic C++20 core engine designed for high-security classification and reasoning of career-related signals. It prioritizes safety and explainability, featuring a rule-based intelligence pipeline that protects critical user data without cloud dependencies.",
   "categories": [
     "creations",
-    "featured"
+    "featured",
+    "Now"
   ],
   "status": "completed",
   "priority": 1,
