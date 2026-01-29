@@ -6,7 +6,7 @@
     "featured",
     "now"
   ],
-  "status": "in-progress",
+  "status": "maintained",
   "priority": 1,
   "tags": [
     "deterministic-orchestration",
